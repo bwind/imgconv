@@ -1,6 +1,12 @@
+mod calc;
+
 use actix_web::{get, web, App, HttpResponse, HttpServer, Responder};
 use actix_web_validator::Query;
+use image::io::Reader as ImageReader;
+use image::{imageops, GenericImageView};
 use serde::Deserialize;
+use std::io::Cursor;
+use std::str;
 use std::str::FromStr;
 use validator::{Validate, ValidationError};
 
@@ -66,7 +72,6 @@ struct QueryInfo {
 
 impl QueryInfo {
     const DEFAULT_RESIZE: &str = "fit";
-    const DEFAULT_ZOOM: f64 = 1.;
     const DEFAULT_FX: f64 = 50.;
     const DEFAULT_FY: f64 = 50.;
 
@@ -86,7 +91,7 @@ fn validate_query_info(query_info: &QueryInfo) -> Result<(), ValidationError> {
             "At least one of `w`, `h` must be provided",
         ));
     }
-    if query_info.resize == Some("crop".to_string())
+    if query_info.resize == Some("crop".to_owned())
         && (query_info.h == None || query_info.w == None)
     {
         return Err(ValidationError::new(
@@ -130,23 +135,72 @@ async fn transcode(query: Query<QueryInfo>, path: web::Path<PathInfo>) -> impl R
         .resize
         .to_owned()
         .unwrap_or(QueryInfo::DEFAULT_RESIZE.to_owned());
-    let media_type = match &query.media_type {
-        Some(m) => MediaType::from_str(m).unwrap(),
-        None => MediaType::DEFAULT,
-    };
-    let default_quality = QueryInfo::get_default_quality_for_media_type(&media_type);
-    let quality = if default_quality.is_err() {
-        None
-    } else {
-        Some(query.quality.unwrap_or_else(|| default_quality.unwrap()))
-    };
-    let zoom = query.zoom.unwrap_or(QueryInfo::DEFAULT_ZOOM);
+    // let media_type = match &query.media_type {
+    //     Some(m) => MediaType::from_str(m).unwrap(),
+    //     None => MediaType::DEFAULT,
+    // };
+    // let default_quality = QueryInfo::get_default_quality_for_media_type(&media_type);
+    // let quality = if default_quality.is_err() {
+    //     None
+    // } else {
+    //     Some(query.quality.unwrap_or_else(|| default_quality.unwrap()))
+    // };
     let fx = query.fx.unwrap_or(QueryInfo::DEFAULT_FX);
     let fy = query.fy.unwrap_or(QueryInfo::DEFAULT_FY);
-    HttpResponse::Ok().body(format!(
-        "Path: {:?},\nQuality: {:?}\nResize: {:?}\nMedia Type: {:?}\nZoom: {}\nfx: {}, fy: {}",
-        path, quality, resize, media_type, zoom, fx, fy
-    ))
+
+    let mut source = ImageReader::open("data/deventer.jpg")
+        .unwrap()
+        .decode()
+        .unwrap();
+    let dimensions = source.dimensions();
+
+    let image_box = calc::Box {
+        w: dimensions.0,
+        h: dimensions.1,
+    };
+    let focal_point = calc::RelativePoint::build(fx, fy).unwrap();
+
+    let result = match resize.as_str() {
+        "fit" => calc::fit(
+            &image_box,
+            &calc::OptionBox::build(query.w, query.h).unwrap(),
+            &focal_point,
+            &query.zoom,
+        ),
+        _ => calc::crop(
+            &image_box,
+            &calc::Box {
+                w: query.w.unwrap(),
+                h: query.h.unwrap(),
+            },
+            &focal_point,
+            &query.zoom,
+        ),
+    };
+
+    let mut resized = imageops::resize(
+        &mut source,
+        result.0.w,
+        result.0.h,
+        imageops::FilterType::CatmullRom,
+    );
+    let cropped = imageops::crop(
+        &mut resized,
+        result.1.top,
+        result.1.left,
+        result.1.bottom - result.1.top,
+        result.1.right - result.1.left,
+    )
+    .to_image();
+
+    let mut bytes: Vec<u8> = Vec::new();
+    cropped
+        .write_to(&mut Cursor::new(&mut bytes), image::ImageOutputFormat::Png)
+        .unwrap();
+
+    HttpResponse::Ok()
+        .append_header(("Content-Type", "image/png"))
+        .body(bytes)
 }
 
 #[actix_web::main]

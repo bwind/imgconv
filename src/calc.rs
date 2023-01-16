@@ -16,6 +16,7 @@ pub struct Point {
 }
 
 // x, y point expressed in percentages
+#[derive(Debug)]
 pub struct RelativePoint {
     x: f64,
     y: f64,
@@ -43,8 +44,8 @@ impl RelativePoint {
 
 #[derive(Debug, PartialEq)]
 pub struct Box {
-    w: u32,
-    h: u32,
+    pub w: u32,
+    pub h: u32,
 }
 
 impl Box {
@@ -78,10 +79,10 @@ impl OptionBox {
 
 #[derive(Debug, PartialEq)]
 pub struct CropBox {
-    top: u32,
-    left: u32,
-    right: u32,
-    bottom: u32,
+    pub top: u32,
+    pub left: u32,
+    pub right: u32,
+    pub bottom: u32,
 }
 
 /// Calculates the focal point as an absolute pixel position on a
